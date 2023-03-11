@@ -40,8 +40,8 @@ public class Lector extends Thread implements Almacen {
 	public void run() {		
 		while(true) {
 			try {
-				
-				
+				// TODO LO QUE FALTABA ERA QUE DORMIRLOS PARA QUE NO SIEMPRE LO COJA UN HILO
+				Thread.sleep(10);
 				e.acquire(); // P(e)
 				if(nw.n > 0) {
 					dr.n = dr.n +1;
@@ -59,7 +59,7 @@ public class Lector extends Thread implements Almacen {
 
 				// Read
 				System.out.println("Lector " + id + " lee");
-				
+				Thread.sleep(10);
 				e.acquire(); // P(e)
 				nr.n = nr.n -1;
 				if(nr.n == 0 && dw.n > 0) {
