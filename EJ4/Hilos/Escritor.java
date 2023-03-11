@@ -38,7 +38,9 @@ public class Escritor extends Thread implements Almacen {
 	@Override 	
 	public void run() {			
 		while(true) {
-			try {							
+			try {	
+				// TODO LO QUE FALTABA ERA DORMIRLOS PARA QUE NO LO COJA SIEMPRE UN HILO
+				//Thread.sleep(100);
 				e.acquire(); // P(e)
 				if(nr.n > 0 || nw.n >0) {
 					dw.n = dw.n+1;
@@ -53,6 +55,7 @@ public class Escritor extends Thread implements Almacen {
 
 				// write
 				System.out.println("Escritor " + id + " escribe");
+				Thread.sleep(10);
 				
 				e.acquire(); // P(e)
 				nw.n = nw.n -1;
@@ -67,6 +70,7 @@ public class Escritor extends Thread implements Almacen {
 					}
 					else e.release(); // V(e)
 				}
+				Thread.sleep(100);
 				
 			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
