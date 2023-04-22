@@ -5,58 +5,125 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.Scanner;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import ENTREGA.Concurrencia.Clases.Entero;
+import ENTREGA.Concurrencia.Lock.AlgoritmoTicket;
+import ENTREGA.Concurrencia.Monitor.MonitorLock;
+
+import java.util.Random;
 
 
-// PUEDE SER UN MAIN PARA ASI ABRIR VARIAS CONSOLAS
 
 public class Cliente extends Thread {
 
+	// Numero en orden de llegada de cada cliente
+	private int numCliente;
+	// Clase usuario con las peliculas
 	private Usuario usuario;
 	
-	private final String HOST = "127.0.0.1"; // Host local
-	private final int PUERTO = 5000;
+	// Host local para conectar el socket del Servidor
+	private final String HOST = "127.0.0.1"; //"localhost";
+	private int PUERTO = 5000; // Puerto guardado
 	
+	// Entrada y salida de mensajes
 	private DataInputStream in;
 	private DataOutputStream out;
-	
+	// Socket que conecta con el servidor
 	private Socket sc;
 	
-	public Cliente(Usuario usuario) {
-		in = null;
-		out = null;
-		sc = null;
-		this.usuario = usuario;
+	// Variables para el Lock.
+	// Se usa para que los clientes se conecten correctamente
+	private volatile AtomicInteger ticket;
+	private Entero next;
+	private Entero[] turno;
+	private AlgoritmoTicket TicketClase;
+	
+	private MonitorLock mPidePeli;
+	
+	private Semaphore sem, semServidor;
+	private Entero entero, numHilos;
+	private HashMap<String, Boolean> mapaClienteActivo;
+	
+	
+	public Cliente(int numCliente, 
+			AtomicInteger ticket, Entero next, Entero[] turno, 
+			MonitorLock mPidePeli,
+			Semaphore sem, Entero entero, Entero numHilos, 
+			Semaphore semServidor, HashMap<String, Boolean> mapaClienteActivo) {
+		this.in = null;
+		this.out = null;
+		this.sc = null;
+		
+		this.numCliente = numCliente;
+		// Lock ----------------------------------
+		this.ticket = ticket;
+		this.next = next;
+		this.turno = turno;
+		this.TicketClase = new AlgoritmoTicket();
+		// Monitor -------------------------------
+		this.mPidePeli = mPidePeli;
+		// Semaforo ------------------------------
+		this.sem = sem;
+		this.entero = entero;
+		this.numHilos = numHilos;
+		this.semServidor = semServidor;
+		this.mapaClienteActivo = mapaClienteActivo;
 	}
 	
-	// TODO
-	private void crearUsuario() {
+	// Funcion para crear usuario
+	private Usuario crearUsuario(String IP) {
+		@SuppressWarnings("resource") // Para suprimir el warning
+		Scanner sn = new Scanner(System.in);
+		String aux = null;
 		
+		System.out.print("ID de usuario (unico): ");			
+		String ID = sn.nextLine();	
+		
+		System.out.print("Numero de peliculas a compartir: ");
+		int numP = sn.nextInt();
+		
+		HashMap<String, String> peliculas = new HashMap<String, String>();
+		aux = sn.nextLine(); // Salto de linea del entero anterior
+		System.out.print("Nombre de las peliculas: ");
+		for(int i = 0; i < numP; i++) {
+			aux = sn.nextLine();
+			peliculas.put(aux,ID);
+		}
+		return new Usuario(ID, IP, peliculas);
 	}
 	
-	// TODO
-	private void generadorIP() {
-		
+	// Generador de IPs de los usuarios
+	private String generadorIP() {
+		String ret = "";
+		Random rand = new Random();
+		int num = 0;
+		for(int i = 0; i < 4; i++) {
+			num = rand.nextInt(255) + 1;
+			if(i == 3) ret +=num;
+			else ret +=num+".";
+		}
+		return ret;
 	}
 	
 	
 	@Override
 	public void run() {			
 		
-		try {
-			// MONITOR, QUE ES EL MAS "DIFICIL"
-			// TODO CONCURRENCIA PARA QUE NO SE CONECTEN A LA VEZ
-			// Conectar el cliente al servidor
-			Usuario usuario1 = new Usuario("1", "104.9.226.93", null);
-			System.out.print("Nombre de usuario (unico)");
-			//scanner
-			System.out.println();
-			System.out.print("Numero de peliculas a compartir: ");
-			//scanner
-			System.out.println();
-			System.out.println("Nombre de las peliculas: ");
+		try {			
+			String IP = generadorIP();
+			
+			// CSEntry/TakeLock
+			TicketClase.TakeLock(numCliente, ticket, next, turno);	
+			
+			// CS. 			
+			usuario = crearUsuario(IP);					
 			
 			sc = new Socket (HOST, PUERTO);
-			System.out.println("Cliente conectandose...");
+			System.out.println("Cliente conectandose...");			
 			
 			// Puente desde el cliente al servidor
 			in = new DataInputStream(sc.getInputStream());
@@ -70,21 +137,26 @@ public class Cliente extends Thread {
 			ObjectOutputStream objectStreamEnviado = new ObjectOutputStream(byteStream);
 			objectStreamEnviado.writeObject(usuario);						
 			byte[] bytesEnviado = byteStream.toByteArray();	
+						
 			
 			// Envia la longitud del array y el array (clase mensaje)
 			out.writeInt(bytesEnviado.length);
-			out.write(bytesEnviado);			
+			out.write(bytesEnviado);
 			
 			// Crea el hilo OyenteCliente
-            OyenteCliente OC = new OyenteCliente(in, out, usuario.getID());
+            OyenteCliente OC = new OyenteCliente(in, out, usuario.getID(), 
+            		mPidePeli, 
+            		sem, entero, numHilos, semServidor, mapaClienteActivo);
             OC.start();
-            OC.join();
+            // CSExit/ReleaseLock
+            TicketClase.ReleaseLock(next);	
+            // TODO
+            //OC.join();
 			
 		} catch (Exception e) {
-			System.out.println("Excepcion en el cliente");
+			Exception excepcion = new Exception("Excepcion en el Cliente");
+			excepcion.setStackTrace(e.getStackTrace());
+			excepcion.printStackTrace();
 		}
-		
-
-		
 	}
 }

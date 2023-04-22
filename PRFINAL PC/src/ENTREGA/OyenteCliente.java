@@ -7,53 +7,90 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.net.Socket;
+import java.util.HashMap;
 import java.util.Scanner;
+import java.util.concurrent.Semaphore;
 
+import ENTREGA.Concurrencia.Clases.Entero;
+import ENTREGA.Concurrencia.Monitor.MonitorLock;
+import ENTREGA.Concurrencia.Monitor.MonitorPuertoLock;
 import ENTREGA.Mensajes.*;
 
-public class OyenteCliente extends Thread{
+public class OyenteCliente extends Thread {
 
-	private DataInputStream in;
-	private DataOutputStream out;
+	// ID del Cliente
 	private String IDCliente;
 	
+	// Entrada y salida de mensajes
+	private DataInputStream in;
+	private DataOutputStream out;
+	
+	// Paso de Mensajes por el Socket
 	private Mensaje mensajeEnviado;
 	private Mensaje mensajeRecibido;
-	private byte[] bytesEnviado;
-	private byte[] bytesRecibido;
+	private byte[] bytesEnviado; // Arrays de Bytes para convertir las clase
+	private byte[] bytesRecibido; // y poder enviarlo gracias a Serializable
 	private ObjectOutputStream objectStreamEnviado;
 	private ObjectInputStream objectStreamRecibido;
 	private ByteArrayOutputStream byteStream;
 	
-	public OyenteCliente(DataInputStream in, DataOutputStream out, String IDCliente) {
+	private boolean conectado;
+	//private boolean finConexion;
+	
+	
+	
+	// Semaforo
+	private Semaphore sem, semServidor;
+	private Entero entero, numHilos;
+	private HashMap<String, Boolean> mapaClienteActivo;
+	
+	// TODO monitor
+	private MonitorLock mPidePeli;
+	//private MonitorPuertoLock mPuerto;
+	
+	public OyenteCliente(DataInputStream in, DataOutputStream out, String IDCliente, 
+			MonitorLock mPidePeli,
+			Semaphore sem, Entero entero, Entero numHilos,
+			Semaphore semServidor, HashMap<String, Boolean> mapaClienteActivo) {
 		this.in = in;
 		this.out = out;
 		this.IDCliente = IDCliente;
 		// ------------
-		mensajeEnviado = null;
-		mensajeRecibido = null;
-		bytesEnviado = null;
-		bytesRecibido = null;
-		objectStreamEnviado = null;
-		objectStreamRecibido = null;
-		byteStream = null;		
+		this.mensajeEnviado = null;
+		this.mensajeRecibido = null;
+		this.bytesEnviado = null;
+		this.bytesRecibido = null;
+		this.objectStreamEnviado = null;
+		this.objectStreamRecibido = null;
+		this.byteStream = null;	
+		this.conectado = false;
+		//finConexion = false;
+		// Monitor -----------------------------------
+		//this.mPuerto = new MonitorPuertoLock(5001);
+		this.mPidePeli = mPidePeli;
+		// Semaforo ----------------------------------
+		this.sem = sem;
+		this.entero = entero;
+		this.numHilos = numHilos;
+		this.semServidor = semServidor;
+		this.mapaClienteActivo = mapaClienteActivo;
 	}
 	
-	// TODO
+	// TODO CONCURRENCIA
 	public void menu() {
 		System.out.println("MENU:");
 		// 1 CONCURRENCIA
 		System.out.println(" 0. Cerrar conexion");
-		// QUITARLO
-		//System.out.println(" 1. Establecer conexion");
 		// 2 CONCURRENCIA 
-		System.out.println(" 2. Lista de usuarios");
-		System.out.println(" 3. Peliculas en el servidor");
+		System.out.println(" 1. Lista de usuarios");
+		System.out.println(" 2. Peliculas en el servidor");
 		
-		System.out.println(" 4. Pedir pelicula");	
+		System.out.println(" 3. Pedir pelicula");	
 		// 2 CONCURRENCIA
-		System.out.println(" 5. Añadir pelicula al usuario con ID: " + IDCliente);	
-		System.out.println(" 6. Eliminar pelicula del usuario con ID: " + IDCliente);	
+		System.out.println(" 4. Añadir pelicula al usuario con ID: " + IDCliente);	
+		System.out.println(" 5. Eliminar pelicula del usuario con ID: " + IDCliente);	
+		if(conectado) System.out.println(" 6. Finalizar conexion");
 	}
 	
 	public void enviarMensaje() throws IOException {
@@ -66,6 +103,7 @@ public class OyenteCliente extends Thread{
 		// Envia la longitud del array y el array (clase mensaje)
 		out.writeInt(bytesEnviado.length);
 		out.write(bytesEnviado);
+		
 		System.out.println("El Cliente ha enviado -> " + mensajeEnviado.getTipo());
 	}
 	
@@ -79,121 +117,271 @@ public class OyenteCliente extends Thread{
 		// Convierte el array de bytes en la clase mensaje
 		objectStreamRecibido = new ObjectInputStream(new ByteArrayInputStream(bytesRecibido));
 		mensajeRecibido = (Mensaje) objectStreamRecibido.readObject();
+		
 		System.out.println("El Cliente ha recibido -> " + mensajeRecibido.getTipo());
 	}
 	
 	@Override
-	public void run() {
-		
-		
+	public void run() {	
+		boolean fin = false;
 		
 		@SuppressWarnings("resource")
 		Scanner sn = new Scanner(System.in);
-		int opcion = -1;
-		boolean fin = false;
+		int opcion = -1;		
 		
-		while(!fin) {
-			
-			menu();
+		// Termina cuando el Cliente pide el cierre de conexion (opcion = 0)
+		while(!fin) {			
 					
 			
-			/*Mensaje mensajeEnviado = null;
-			Mensaje mensajeRecibido = null;
-			byte[] bytesEnviado = null;
-			byte[] bytesRecibido = null;
-			ObjectOutputStream objectStreamEnviado = null;
-			ObjectInputStream objectStreamRecibido = null;
-			ByteArrayOutputStream byteStream = null;*/
+			// sem
+			// Espera en el caso de que otro cliente quiera recibir fichero
+			// sem					
 			
+			
+			
+			if(mPidePeli.getPideFich(IDCliente)){
+				try {
+					recibeMensaje();						
+					mensajeEnviado = new MPreparadoCS("Cliente","Servidor");
+					enviarMensaje();
+					// Ya no le piden mas ficheros
+					mPidePeli.pideFichFalse(IDCliente);
+				} catch (Exception e) {
+					Exception excepcion = new Exception("Excepcion en OyenteCliente, al pedir pelicula");
+					excepcion.setStackTrace(e.getStackTrace());
+					excepcion.printStackTrace();
+				}
+			}	 
+			
+			
+			menu();	
 			opcion = sn.nextInt();
+			
+			 			
+			boolean aux = false;			
+			
+			
 			try {
+				semServidor.acquire();
+				mapaClienteActivo.put(IDCliente, true);			
+				semServidor.release();
+				// Manda la opccion elegida al OyenteServidor
 				out.writeInt(opcion);
 			
 				switch (opcion) {
 				// CERRAR CONEXION	
-				case 0: { 						
-						// El Cliente manda un mensaje al Servidor -------------------------------------
-						// -----------------------------------------------------------------------------
+				case 0: { 		
+						 
+						// Modifican la tabla de usuarios, entero.valor = 1
+						sem.acquire();
+						if(entero.getValor() != 0 && entero.getValor() != 1){
+							sem.release();
+							while(entero.getValor() != 0 && entero.getValor() != 1){ }
+							sem.acquire();					
+						} 						
+						entero.setValor(1);	
+						numHilos.addValor(1);
+						sem.release();											
+						
+						
+						// Mensaje a enviar
 						mensajeEnviado = new MCerrarConexion("Cliente", "Servidor");				
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)
 						enviarMensaje();
-						fin = true;
-						/*
-						// Convierte la instancia de la clase del mensaje a enviar, en un array de bytes
-						byteStream = new ByteArrayOutputStream();
-						objectStreamEnviado = new ObjectOutputStream(byteStream);
-						objectStreamEnviado.writeObject(mensajeEnviado);						
-						bytesEnviado = byteStream.toByteArray();	
-						
-						// Envia la longitud del array y el array (clase mensaje)
-						out.writeInt(bytesEnviado.length);
-						out.write(bytesEnviado);
-						System.out.println("El Cliente ha enviado -> " + mensajeEnviado.getTipo());*/
-						
-						// -----------------------------------------------------------------------------
-						// El Cliente recibe el mensaje del Servidor -----------------------------------
-						
-						
+						// Termina el bucle para eliminar el hilo OyenteCliente
+						fin = true;						
+						// Recibe el mensaje de confirmacion del Servidor
 						recibeMensaje();
-						
-						
-						// Recibe la longitud del array
-						/*int length = in.readInt();
-						bytesRecibido = new byte[length];
-						// Recibe el array de bytes
-						in.readFully(bytesRecibido, 0, length);
-						
-						// Convierte el array de bytes en la clase mensaje
-						objectStreamRecibido = new ObjectInputStream(new ByteArrayInputStream(bytesRecibido));
-						mensajeRecibido = (Mensaje) objectStreamRecibido.readObject();
-						System.out.println("El Cliente ha recibido -> " + mensajeRecibido.getTipo());*/
+
+						sem.acquire();
+						numHilos.restaValor(1);
+						sem.release();						
 						
 						break;
 					}
-					case 1: { // Establecer conexion						
-						//mensajeEnviado = new MConexion("origen", "destino");
-						break;
-					}
-					case 2: { // Lista de usuarios
+					// LISTA DE USUARIOS 
+					case 1: { 
+						
+						// Acceden a la tabla de usuarios, entero.valor = 2
+						sem.acquire();
+						if(entero.getValor() != 0 && entero.getValor() != 2){
+							sem.release();
+							while(entero.getValor() != 0 && entero.getValor() != 2){ }
+							sem.acquire();					
+						} 						
+						entero.setValor(2);
+						numHilos.addValor(1);
+						sem.release();
+						
+						// Mensaje a enviar
 						mensajeEnviado = new MListaUsuarios("Cliente", "Servidor");
-						enviarMensaje();						
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)							
+						enviarMensaje();									
+						// Recibe el mensaje de confirmacion del Servidor
 						recibeMensaje();
-						mensajeRecibido.imprimeUsuarios();
-						// recibeTablaUsuarios
+						// Imprime la lista de usuarios
+						mensajeRecibido.imprimeUsuarios();	
 						
-						// Lee la lista de usuarios
+						sem.acquire();
+						numHilos.restaValor(1);
+						sem.release();
 						
 						break;
 					}
-					case 3: { // Lista de peliculas
+					// LISTA DE PELICULAS
+					case 2: { 
+												 
+						// Acceden a la tabla de usuarios, entero.valor = 2
+						sem.acquire();
+						if(entero.getValor() != 0 && entero.getValor() != 2){
+							sem.release();
+							while(entero.getValor() != 0 && entero.getValor() != 2){ }
+							sem.acquire();					
+						} 						
+						entero.setValor(2);	
+						numHilos.addValor(1);
+						sem.release();											
+												
+						// Mensaje a enviar
 						mensajeEnviado = new MListaPeliculas("Cliente", "Servidor");
-						
-						enviarMensaje();											
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)
+						enviarMensaje();	
+						// Recibe el mensaje de confirmacion del Servidor
 						recibeMensaje();
+						// Imprime la lista de peliculas
 						mensajeRecibido.imprimePeliculas();
-						break;
-					}
-					case 4: { // Pedir pelicula
-						mensajeEnviado = new MPedirFichero("Cliente", "Servidor");
 						
-						// Establecer conexion con un usuario que tenga la pelicula
+						sem.acquire();
+						numHilos.restaValor(1);
+						sem.release();
+						
 						break;
 					}
-					case 5: { // Pedir pelicula
-						mensajeEnviado = new MAddPelicula("Cliente", "Servidor");
+					// PEDIR FICHERO
+					case 3: {	
+						
+						aux = true;
+						// TODO Semaforo ????										
+						
+						
+						System.out.print("Nombre de la pelicula deseada: ");
+						// Pelicula a añadir
+						String p = sn.nextLine();
+						p = sn.nextLine();											
+						
+						mensajeEnviado = new MPedirFichero("Cliente", "Servidor", p);
+						enviarMensaje(); // envia mensaje de peticion	
+						recibeMensaje(); // recibe menaje de confirmacion		
+						conectado = true;
+						break;
+					}
+					// AÑADIR PELICULA
+					case 4: { 
+						 
+						// Modifican la tabla de usuarios, entero.valor = 1
+						sem.acquire();
+						if(entero.getValor() != 0 && entero.getValor() != 1){
+							sem.release();
+							while(entero.getValor() != 0 && entero.getValor() != 1){ }
+							sem.acquire();					
+						} 						
+						entero.setValor(1);	
+						numHilos.addValor(1);
+						sem.release();											
+						
+						System.out.print("Nombre de la pelicula a añadir: ");
+						// Pelicula a añadir
+						String p = sn.nextLine();
+						p = sn.nextLine();
+						
+						// Mensaje a enviar
+						mensajeEnviado = new MAddPelicula("Cliente", "Servidor", p);
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)
 						enviarMensaje();
-						
+						// Recibe el mensaje de confirmacion del Servidor
 						recibeMensaje();
-						// Establecer conexion con un usuario que tenga la pelicula
+						
+						sem.acquire();
+						numHilos.restaValor(1);
+						sem.release();
+						
 						break;
 					}
+					// ELIMINAR PELICULA
+					case 5: { 
+						 
+						// Modifican la tabla de usuarios, entero.valor = 1
+						sem.acquire();
+						if(entero.getValor() != 0 && entero.getValor() != 1){
+							sem.release();
+							while(entero.getValor() != 0 && entero.getValor() != 1){ }
+							sem.acquire();					
+						} 						
+						entero.setValor(1);
+						numHilos.addValor(1);
+						sem.release();											
+						
+						
+						System.out.print("Nombre de la pelicula a eliminar: ");
+						// Pelicula a eliminar
+						String p = sn.nextLine();
+						p = sn.nextLine();
+						
+						// Mensaje a enviar
+						mensajeEnviado = new MEliminaPelicula("Cliente", "Servidor", p);
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)
+						enviarMensaje();
+						// Recibe el mensaje de confirmacion del Servidor
+						recibeMensaje();
+						
+						sem.acquire();
+						numHilos.restaValor(1);
+						sem.release();
+						break;
+					}
+					case 6: {
+						aux = true;
+						// Termina la conexion con el cliente que tenia la pelicula
+						// Mensaje a enviar
+						mensajeEnviado = new MFinalizarConexion("Cliente", "Servidor");
+						// Enviar el mensaje al Servidor (mediante OyenteServidor)
+						enviarMensaje();
+						// Recibe el mensaje de confirmacion del Servidor
+						recibeMensaje();
+						
+						//finConexion = true;			
+						// TODO Comprobar que no este conectado a mas clientes
+						// y poner a falso conectado en tal caso.
+						conectado = false;
+						
+					}											
 					default:	
 						System.out.println("Introduce un numero del 0-5 (incluidos)");
 						
 				}
-			} catch (IOException e) {
-				e.printStackTrace();
-			} catch (ClassNotFoundException e) {
-				e.printStackTrace();
+				
+				
+				// Pone a 0 el valor del entero para controlar la entrada de 
+				// opcciones de los diferentes clientes conectados al servidor
+				if(!aux) {
+					sem.acquire();		
+					 if(numHilos.getValor() == 0) {
+						entero.setValor(0);				
+					}
+					sem.release();
+				}																		
+				
+				// El cliente termina de pedir al servidor
+				semServidor.acquire();
+				mapaClienteActivo.put(IDCliente, false);			
+				semServidor.release();			
+								
+				
+				
+			} catch (Exception e) {
+				Exception excepcion = new Exception("Excepcion en OyenteCliente");
+				excepcion.setStackTrace(e.getStackTrace());
+				excepcion.printStackTrace();
 			}
 			
 		}

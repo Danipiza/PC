@@ -1,7 +1,6 @@
 package ENTREGA;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.HashMap;
 
 public class Usuario implements Serializable {
@@ -10,12 +9,14 @@ public class Usuario implements Serializable {
 	
 	private String id;
 	private String ip;
-	private HashMap<String, Integer> peliculas;
+	private HashMap<String, String> peliculas;
+	private int conectados;
 	
-	public Usuario(String id, String ip, HashMap<String, Integer> peliculas) {
+	public Usuario(String id, String ip, HashMap<String, String> peliculas) {
 		this.id = id;
 		this.ip = ip;
 		this.peliculas = peliculas;
+		this.conectados = 0;
 	}
 	
 	public String getID() {
@@ -26,11 +27,27 @@ public class Usuario implements Serializable {
 		return this.ip;
 	}
 	
-	public void addPeliculaUsuario(String p) {
-		peliculas.put(p, 1);
+	public int getConectados() {
+		return this.conectados;
 	}
 	
-	public HashMap<String, Integer> getPeliculas(){
+	public void addConectado() {
+		this.conectados++;
+	}
+	
+	public void eliminaConectado() {
+		this.conectados--;
+	}
+	
+	public void addPeliculaUsuario(String p) {
+		peliculas.put(p, id);
+	}
+	
+	public void eliminaPeliculaUsuario(String p) {
+		peliculas.remove(p);
+	}
+	
+	public HashMap<String, String> getPeliculas(){
 		return peliculas;
 	}
 	
